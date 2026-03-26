@@ -1,9 +1,13 @@
 import rclpy                              # WHY: rclpy is the ROS2 Python library — like importing ros2 itself
 from rclpy.node import Node              # WHY: Node is the base class — like MonoBehaviour in Unity
-from std_msgs.msg import String          # WHY: String is a standard ROS2 message type — typed, not a plain dict
+from sensor_msgs.msg import Image       # WHY: String is a standard ROS2 message type — typed, not a plain dict
+from cv_bridge import CvBridge
+import cv2
+import os
+import glob         
 
 class CameraPublisher(Node):             # WHY: inherit from Node to get all ROS2 powers
-    def __init__(self):
+    def __init__(self, image_dir):
         super().__init__('camera_publisher')  # WHY: registers this node with ROS2 under the name 'camera_publisher'
                                               # two nodes with same name = ROS2 kills the older one
 
@@ -11,29 +15,50 @@ class CameraPublisher(Node):             # WHY: inherit from Node to get all ROS
         # 1. String — what message type we're sending
         # 2. '/camera/image_raw' — which topic to publish on
         # 3. 10 — queue size (max 10 messages backlog before dropping old ones)
-        self.publisher = self.create_publisher(String, '/camera/image_raw', 10)
-
-        # WHY: create_timer replaces while True + time.sleep()
+        self.publisher = self.create_publisher(Image, '/camera/image_raw', 10)        # WHY: create_timer replaces while True + time.sleep()
         # ROS2 calls self.publish_frame automatically every 0.5 seconds
         # cleaner than threading — ROS2 manages the loop for you
         self.timer = self.create_timer(0.5, self.publish_frame)
 
-        self.frame_id = 0                # WHY: track which frame we're on
+        self.frame_id = 0  
+        self.bridge = CvBridge()                                          # translator instance — reuse for every frame
+        self.image_files = sorted(glob.glob(os.path.join(image_dir, '*.png')))  # find all PNGs, sorted by name
+        self.current_index = 0                                            # which frame we're on
+        self.total_frames = len(self.image_files)                         # total count              # WHY: track which frame we're on
 
-    def publish_frame(self):             # WHY: this is the callback — ROS2 calls this every 0.5 seconds
-        msg = String()                   # WHY: create a typed ROS2 String message — not a plain dict
-        msg.data = f'Frame {self.frame_id} — 248250 points | Z range: 1.46m → 9.33m'
-                                         # WHY: simulating what our real point cloud publisher would send
-        self.publisher.publish(msg)      # WHY: send message to the topic — bus delivers to all subscribers
-        self.get_logger().info(f'Published: {msg.data}')  # WHY: ROS2 logger — better than print() for robots
-        self.frame_id += 1
+    def publish_frame(self):
+        if self.current_index >= self.total_frames:    # no more images? stop the timer
+            self.timer.cancel()
+            return
+
+    # STEP 1: Load image from disk
+        image_path = self.image_files[self.current_index]
+        frame = cv2.imread(image_path)                 # returns (480, 640, 3) BGR NumPy array
+
+        if frame is None:                              # corrupted file? skip it
+            self.current_index += 1
+            return
+
+    # STEP 2: Convert BGR → grayscale
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) # (480, 640, 3) → (480, 640) uint8
+
+    # STEP 3: NumPy → sensor_msgs/Image  ← THIS IS THE DAY 28 FIX
+        img_msg = self.bridge.cv2_to_imgmsg(gray, encoding='mono8')
+
+    # STEP 4: Add timestamp and frame ID
+        img_msg.header.stamp = self.get_clock().get_rostime()
+        img_msg.header.frame_id = 'camera_frame'
+
+    # STEP 5: Publish
+        self.publisher.publish(img_msg)
+        self.current_index += 1
 
 def main():
-    rclpy.init()                         # WHY: initialize ROS2 — must be called before anything else
-    node = CameraPublisher()             # WHY: create our node instance
-    rclpy.spin(node)                     # WHY: spin keeps the node alive — like Unity's game loop
-                                         # it processes callbacks, timers, incoming messages forever
-    rclpy.shutdown()                     # WHY: clean up when done
+    rclpy.init()
+    image_dir = '/path/to/tum_dataset/rgb'   # ← change this to your actual path
+    node = CameraPublisher(image_dir)
+    rclpy.spin(node)
+    rclpy.shutdown()                  # WHY: clean up when done
 
 if __name__ == '__main__':
     main()
