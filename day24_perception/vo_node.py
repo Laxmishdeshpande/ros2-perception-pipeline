@@ -7,6 +7,8 @@ import numpy as np
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 from scipy.spatial.transform import Rotation
+from nav_msgs.msg import Path
+from geometry_msgs.msg import PoseStamped
 
 
 class vo_node(Node):
@@ -21,6 +23,8 @@ class vo_node(Node):
         self.R_global = np.eye(3)
         self.t_global = np.zeros((3, 1))
         self.frame_count = 0
+        self.path_pub  = self.create_publisher(Path, '/vo/path', 10)
+        self.path_msg  = Path()
 
         self.K = np.array([[565.6, 0.0,   320.2],
                    [0.0,   565.6, 180.2],
@@ -130,6 +134,21 @@ class vo_node(Node):
 
         self.tf_broadcaster.sendTransform(tf)               # FIX 6: matches __init__ name
 
+        pose = PoseStamped()
+        pose.header.stamp = stamp
+        pose.header.frame_id = 'odom'
+        pose.pose.position.x = float(cam_pos[0])
+        pose.pose.position.y = float(cam_pos[1])
+        pose.pose.position.z = float(cam_pos[2])
+        pose.pose.orientation.x = float(quat[0])
+        pose.pose.orientation.y = float(quat[1])
+        pose.pose.orientation.z = float(quat[2])
+        pose.pose.orientation.w = float(quat[3])
+        
+        self.path_msg.header.stamp = stamp
+        self.path_msg.header.frame_id = 'odom'
+        self.path_msg.poses.append(pose)
+        self.path_pub.publish(self.path_msg)
 
 def main():
     rclpy.init()
