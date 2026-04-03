@@ -30,6 +30,7 @@ setup(
         'tf2_broadcaster = day24_perception.tf2_broadcaster:main',
         'vo_node = day24_perception.vo_node:main',
         'yolo_node = day24_perception.yolo_node:main',
+        'seg_node = day24_perception.seg_node:main',
     ],
 },
 )
